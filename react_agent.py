@@ -187,7 +187,21 @@ def run_agent_loop(user_query: str, max_iterations: int = 6, verbose: bool = Tru
             else:
                 executed_actions.add(action_signature)
                 tool_result = execute_tool(tool_name, kwargs)
-                observation = f"\nObservation: {tool_result}\n"
+                # Self-healing: if the tool reported an error (bad params, shape
+                # mismatch, NaN loss), make that explicit so the model reasons
+                # about the failure and retries with corrected parameters,
+                # instead of just seeing another opaque JSON blob.
+                try:
+                    parsed_result = json.loads(tool_result)
+                    if isinstance(parsed_result, dict) and "error" in parsed_result:
+                        observation = (
+                            f"\nObservation: ERROR — {parsed_result['error']} "
+                            f"Reconsider your parameters for '{tool_name}' and try again with corrected values.\n"
+                        )
+                    else:
+                        observation = f"\nObservation: {tool_result}\n"
+                except (json.JSONDecodeError, TypeError):
+                    observation = f"\nObservation: {tool_result}\n"
  
         if verbose:
             print(observation)
