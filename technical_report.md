@@ -52,55 +52,18 @@ decision_tree consistently underperforms both other models on mean accuracy acro
 Recommendation: for a deployment scenario prioritizing predictable, low-variance behavior (e.g., clinical screening), logistic_regression's combination of high mean accuracy and low standard deviation makes it the more defensible choice over random_forest despite the latter's higher peak test-set number, illustrating CO1's emphasis on understanding why an algorithm performs the way it does, not just which number is largest.
 
 5. Architecture Diagram — Agent Controller Loop and Tool Registry
-                    ┌─────────────────────────────┐
-                    │        User Query            │
-                    └──────────────┬───────────────┘
-                                   ▼
-                    ┌─────────────────────────────┐
-              ┌────▶│   react_agent.py            │
-              │     │   run_agent_loop()           │
-              │     └──────────────┬───────────────┘
-              │                    ▼
-              │     ┌─────────────────────────────┐
-              │     │  query_local_llm()           │──────▶  Ollama REST API
-              │     │  (sends prompt + history)    │◀──────  (127.0.0.1:11434,
-              │     └──────────────┬───────────────┘         llama3.2:1b)
-              │                    ▼
-              │     ┌─────────────────────────────┐
-              │     │  truncate_to_first_step()    │  (discards hallucinated
-              │     │  parse_action()              │   continuation past the
-              │     └──────────────┬───────────────┘   first real step)
-              │                    ▼
-              │          ┌───────────────────┐
-              │          │  Action requested? │
-              │          └─────┬────────┬─────┘
-              │           yes  │        │  no / Final Answer
-              │                ▼        └──────────▶ return to user
-              │     ┌─────────────────────────────┐
-              │     │  Repetition check            │
-              │     │  (executed_actions set)      │
-              │     └──────────────┬───────────────┘
-              │                    ▼
-              │     ┌─────────────────────────────┐
-              │     │  execute_tool()               │──────▶  ml_tools.py
-              │     │                               │         AVAILABLE_TOOLS
-              │     │                               │         ├─ load_dataset_summary
-              │     │                               │         ├─ train_sklearn_model
-              │     │                               │         ├─ train_pytorch_mlp
-              │     │                               │         ├─ tune_hyperparameters
-              │     │                               │         ├─ reduce_dimensionality
-              │     │                               │         └─ train_regularized_mlp
-              │     └──────────────┬───────────────┘
-              │                    ▼
-              │     ┌─────────────────────────────┐
-              │     │  Error in result?             │──yes─▶ explicit ERROR Observation
-              │     │  (self-healing check)         │        (self-correction prompt)
-              │     └──────────────┬───────────────┘
-              │                    ▼ no
-              │     ┌─────────────────────────────┐
-              └─────│  Append Observation to       │
-                    │  prompt, loop again           │
-                    └─────────────────────────────┘
+The controller loop in react_agent.py follows this flow on every iteration:
+
+1.User Query enters run_agent_loop().
+2.query_local_llm() sends the running prompt/history to the Ollama REST API (127.0.0.1:11434, model llama3.2:1b) and receives a raw response.
+3.truncate_to_first_step() cuts that response at the first real Action/Action Input pair or the first Final Answer — discarding any hallucinated continuation the model generated past that point.
+4.parse_action() extracts the tool name and arguments (if any).
+    If the response is a Final Answer → the loop ends and the answer is returned to the user.
+    If an Action was requested → continue to step 5.
+5.Repetition check: the (tool, arguments) signature is compared against executed_actions. If it's a duplicate, the model receives an Observation telling it to try something different instead of re-running the tool.
+6.execute_tool() calls the matching function in ml_tools.py's AVAILABLE_TOOLS registry: load_dataset_summary, train_sklearn_model, train_pytorch_mlp, tune_hyperparameters, reduce_dimensionality, or train_regularized_mlp.
+7.Self-healing check: if the tool's JSON result contains an "error" key, the Observation explicitly flags it (ERROR — ...) and asks the model to reconsider its parameters.
+8.The Observation (real result or error) is appended to the prompt, and the loop returns to step 2 — repeating until a genuine Final Answer is produced or max_iterations is reached.
 6. Summary of Deliverables
 Task	Status
 Task 1 — Environment, baseline ReAct loop	Complete (CPU-only PyTorch; GPU passthrough out of scope)
