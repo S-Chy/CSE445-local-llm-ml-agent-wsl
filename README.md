@@ -70,5 +70,4 @@ python benchmark_runner.py
 - [x] Technical report
 
 See `technical_report.md` for full architecture details, latency benchmarks, and the
-mathematical model comparison, and `technical_note.md` for a log of issues encountered and
-fixed during development.
+mathematical model comparison.
